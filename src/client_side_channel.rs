@@ -134,6 +134,13 @@ impl ClientSideChannel {
                     self.metrics
                         .discarded_outgoing_messages
                         .add_u64(buffer.len() as u64);
+                    if self.exponential_backoff.retried_count >= 25 {
+                        warn!(
+                            self.logger,
+                            "Connecting retried_count >= 25: {}",
+                            self.exponential_backoff.retried_count,
+                        );
+                    }
                     let next = Self::wait_or_reconnect(
                         self.server,
                         &mut self.exponential_backoff,
@@ -166,6 +173,13 @@ impl ClientSideChannel {
             MessageStreamState::Connected { ref mut stream } => match track!(stream.poll()) {
                 Err(e) => {
                     error!(self.logger, "Message stream aborted: {}", e);
+                    if self.exponential_backoff.retried_count >= 25 {
+                        warn!(
+                            self.logger,
+                            "Connected Err retried_count >= 25: {}",
+                            self.exponential_backoff.retried_count,
+                        );
+                    }
                     let next = Self::wait_or_reconnect(
                         self.server,
                         &mut self.exponential_backoff,
@@ -177,6 +191,13 @@ impl ClientSideChannel {
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Ok(Async::Ready(None)) => {
                     warn!(self.logger, "Message stream terminated");
+                    if self.exponential_backoff.retried_count >= 25 {
+                        warn!(
+                            self.logger,
+                            "Connected term retried_count >= 25: {}",
+                            self.exponential_backoff.retried_count,
+                        );
+                    }
                     let next = Self::wait_or_reconnect(
                         self.server,
                         &mut self.exponential_backoff,
