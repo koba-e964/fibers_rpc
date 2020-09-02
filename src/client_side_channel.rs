@@ -100,6 +100,12 @@ impl ClientSideChannel {
         metrics: &ClientMetrics,
         options: &ChannelOptions,
     ) -> MessageStreamState {
+        if backoff.retried_count >= 25 {
+            eprintln!(
+                "wait_or_reconnect entered retried_count >= 25: {}\n\n",
+                backoff.retried_count,
+            );
+        }
         metrics.channels().remove_channel_metrics(server);
         if let Some(timeout) = backoff.timeout() {
             MessageStreamState::Wait { timeout }
@@ -121,6 +127,13 @@ impl ClientSideChannel {
     fn poll_message_stream(&mut self) -> Result<Async<Option<MessageStreamState>>> {
         match self.message_stream {
             MessageStreamState::Wait { ref mut timeout } => {
+                if self.exponential_backoff.retried_count >= 25 {
+                    warn!(
+                        self.logger,
+                        "poll_message_stream entered Wait: retried_count >= 25: {}",
+                        self.exponential_backoff.retried_count,
+                    );
+                }
                 let is_expired = track!(timeout.poll().map_err(from_timeout_error))?.is_ready();
                 if is_expired {
                     info!(
@@ -404,13 +417,19 @@ impl ExponentialBackoff {
         ExponentialBackoff { retried_count: 0 }
     }
     fn next(&mut self) {
+        if self.retried_count >= 25 {
+            eprintln!(
+                "ExponentialBackoff::next retried_count >= 25: {}\n\n",
+                self.retried_count,
+            );
+        }
         self.retried_count += 1;
     }
     fn timeout(&self) -> Option<Timeout> {
         if self.retried_count == 0 {
             None
         } else {
-            let duration = Duration::from_secs(2u64.pow(self.retried_count as u32 - 1));
+            let duration = Duration::from_secs(2u64.pow(self.retried_count as u32 - 1) + 11);
             Some(timer::timeout(duration))
         }
     }
