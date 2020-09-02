@@ -71,6 +71,12 @@ impl ClientSideChannel {
         if let MessageStreamState::Wait { .. } = self.message_stream {
             info!(self.logger, "Waked up");
             self.exponential_backoff.next();
+            if self.exponential_backoff.retried_count >= 25 {
+                warn!(
+                    self.logger,
+                    "force_wakeup retried_count >= 25: {}", self.exponential_backoff.retried_count,
+                );
+            }
             let next = MessageStreamState::Connecting {
                 buffer: Vec::new(),
                 future: tcp_connect(self.server, &self.options),
@@ -99,6 +105,12 @@ impl ClientSideChannel {
             MessageStreamState::Wait { timeout }
         } else {
             backoff.next();
+            if backoff.retried_count >= 25 {
+                eprintln!(
+                    "wait_or_reconnect retried_count >= 25: {}\n\n",
+                    backoff.retried_count,
+                );
+            }
             MessageStreamState::Connecting {
                 buffer: Vec::new(),
                 future: tcp_connect(server, options),
@@ -116,6 +128,13 @@ impl ClientSideChannel {
                         "Reconnecting timeout expired; starts reconnecting"
                     );
                     self.exponential_backoff.next();
+                    if self.exponential_backoff.retried_count >= 25 {
+                        warn!(
+                            self.logger,
+                            "poll_message_stream retried_count >= 25: {}",
+                            self.exponential_backoff.retried_count,
+                        );
+                    }
                     let next = MessageStreamState::Connecting {
                         buffer: Vec::new(),
                         future: tcp_connect(self.server, &self.options),
