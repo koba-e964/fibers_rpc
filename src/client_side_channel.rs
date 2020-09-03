@@ -71,10 +71,13 @@ impl ClientSideChannel {
         if let MessageStreamState::Wait { .. } = self.message_stream {
             info!(self.logger, "Waked up");
             self.exponential_backoff.next();
-            if self.exponential_backoff.retried_count >= 25 {
+            self.exponential_backoff.retried_count -= 1; // next() で増えた分打ち消し
+            if self.exponential_backoff.retried_count_with_forced_wakeup >= 25 {
                 warn!(
                     self.logger,
-                    "force_wakeup retried_count >= 25: {}", self.exponential_backoff.retried_count,
+                    "force_wakeup retried_count_with_forced_wakeup >= 25: {} (with_forced {})",
+                    self.exponential_backoff.retried_count,
+                    self.exponential_backoff.retried_count_with_forced_wakeup,
                 );
             }
             let next = MessageStreamState::Connecting {
@@ -260,11 +263,12 @@ impl Future for ClientSideChannel {
 
         while let Async::Ready(next) = {
             let result = track!(self.poll_message_stream());
-            if self.exponential_backoff.retried_count >= 25 {
+            if self.exponential_backoff.retried_count_with_forced_wakeup >= 25 {
                 warn!(
                     self.logger,
-                    "Calling poll_message_stream retried_count >= 25: {} {:?} count={} server={:?}, next={:?}",
+                    "Calling poll_message_stream retried_count_with_forced_wakeup >= 25: {} (with_forced {})  {:?} count={} server={:?}, next={:?}",
                     self.exponential_backoff.retried_count,
+                    self.exponential_backoff.retried_count_with_forced_wakeup,
                     result,
                     count,
                     self.server,
@@ -426,19 +430,25 @@ impl Future for KeepAlive {
 #[derive(Debug)]
 struct ExponentialBackoff {
     retried_count: usize,
+    retried_count_with_forced_wakeup: usize,
 }
 impl ExponentialBackoff {
     fn new() -> Self {
-        ExponentialBackoff { retried_count: 0 }
+        ExponentialBackoff {
+            retried_count: 0,
+            retried_count_with_forced_wakeup: 0,
+        }
     }
     fn next(&mut self) {
-        if self.retried_count >= 25 {
+        if self.retried_count_with_forced_wakeup >= 25 {
             eprintln!(
-                "ExponentialBackoff::next retried_count >= 25: {}\n\n",
+                "ExponentialBackoff::next retried_count_with_forced_wakeup >= 25: {} (with_forced {})\n\n",
                 self.retried_count,
+                self.retried_count_with_forced_wakeup,
             );
         }
         self.retried_count += 1;
+        self.retried_count_with_forced_wakeup += 1;
     }
     fn timeout(&self) -> Option<Timeout> {
         if self.retried_count == 0 {
