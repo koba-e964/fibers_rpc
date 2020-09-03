@@ -460,6 +460,7 @@ impl ExponentialBackoff {
     }
     fn reset(&mut self) {
         self.retried_count = 0;
+        self.retried_count_with_forced_wakeup = 0;
     }
 }
 
