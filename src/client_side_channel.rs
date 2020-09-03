@@ -257,7 +257,22 @@ impl Future for ClientSideChannel {
         }
 
         let mut count = 0;
-        while let Async::Ready(next) = track!(self.poll_message_stream())? {
+
+        while let Async::Ready(next) = {
+            let result = track!(self.poll_message_stream());
+            if self.exponential_backoff.retried_count >= 25 {
+                warn!(
+                    self.logger,
+                    "Calling poll_message_stream retried_count >= 25: {} {:?} count={} server={:?}, next={:?}",
+                    self.exponential_backoff.retried_count,
+                    result,
+                    count,
+                    self.server,
+                    self.next_message_id,
+                );
+            }
+            result
+        }? {
             if let Some(next) = next {
                 self.update_message_stream_state(next);
             }
