@@ -11,16 +11,20 @@ use bytecodec::marker::Never;
 use factory::{DefaultFactory, Factory};
 use fibers::net::futures::{Connected, TcpListenerBind};
 use fibers::net::streams::Incoming;
-use fibers::net::TcpListener;
 use fibers::sync::mpsc;
 use fibers::{self, BoxSpawn, Spawn};
 use futures::future::{loop_fn, Either, Loop};
 use futures::{self, Async, Future, Poll, Stream};
+use futures03::compat::Compat;
+use futures03::{Future as Future03, Stream as Stream03};
 use prometrics::metrics::MetricBuilder;
 use slog::{Discard, Logger};
 use std::collections::HashMap;
+use std::io::Result as IOResult;
 use std::mem;
 use std::net::SocketAddr;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 
 /// RPC server builder.
 #[derive(Debug)]
@@ -218,7 +222,7 @@ impl ServerBuilder {
         info!(logger, "Starts RPC server");
         let handlers = mem::replace(&mut self.handlers, MessageHandlers(HashMap::new()));
         Server {
-            listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
+            listener: Listener::Binding(Box::new(TcpListener::bind(self.bind_addr))),
             logger,
             spawner,
             assigner: Assigner::new(handlers),
@@ -232,7 +236,7 @@ impl ServerBuilder {
 #[must_use = "futures do nothing unless polled"]
 #[derive(Debug)]
 pub struct Server<S> {
-    listener: Listener,
+    listener: ListenerCompat,
     logger: Logger,
     spawner: S,
     assigner: Assigner,
@@ -301,18 +305,11 @@ where
                 let exit_logger = logger.clone();
                 let spawner = self.spawner.clone().boxed();
                 let assigner = self.assigner.clone();
-                let future = client
-                    .map_err(|e| track!(Error::from(e)))
-                    .and_then(move |stream| {
-                        let channel = ServerSideChannel::new(
-                            logger,
-                            stream,
-                            assigner.clone(),
-                            options,
-                            metrics,
-                        );
-                        ChannelHandler::new(spawner, channel)
-                    });
+                let future = {
+                    let channel =
+                        ServerSideChannel::new(logger, client, assigner.clone(), options, metrics);
+                    ChannelHandler::new(spawner, channel).map_err(|e| track!(Error::from(e)))
+                };
                 self.spawner.spawn(future.then(move |result| {
                     channels.remove_channel_metrics(addr);
                     if let Err(e) = result {
@@ -393,9 +390,10 @@ impl Future for ChannelHandler {
     }
 }
 
+/*
 #[derive(Debug)]
 enum Listener {
-    Binding(TcpListenerBind),
+    Binding(Box<dyn Future03<Output = std::io::Result<TcpListener>> + Send>),
     Listening(Incoming, SocketAddr),
 }
 impl Stream for Listener {
@@ -418,5 +416,31 @@ impl Stream for Listener {
             *self = next;
         }
         Ok(Async::NotReady)
+    }
+}*/
+
+#[derive(Debug)]
+struct ListenerCompat {
+    inner: Compat<TcpListener>,
+}
+
+impl Stream for ListenerCompat {
+    type Item = (TcpStream, SocketAddr);
+
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        let local_addr = self.local_addr()?;
+        match self.inner.poll()? {
+            Async::Ready(Some(stream)) => Ok(Async::Ready(Some((stream, local_addr)))),
+            Async::Ready(None) => Ok(Async::Ready(None)),
+            Async::NotReady => Ok(Async::NotReady),
+        }
+    }
+}
+
+impl ListenerCompat {
+    fn local_addr(&self) -> IOResult<SocketAddr> {
+        self.inner.get_ref().local_addr()
     }
 }

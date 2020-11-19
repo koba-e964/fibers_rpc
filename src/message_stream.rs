@@ -9,7 +9,6 @@ use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use bytecodec::combinator::{MaybeEos, Peekable, Slice};
 use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
 use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
-use fibers::net::TcpStream;
 use fibers::sync::mpsc;
 use fibers::time::timer::{self, Timeout};
 use fibers_tasque::DefaultCpuTaskQueue;
@@ -17,6 +16,7 @@ use futures::{Async, Future, Poll, Stream};
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
+use tokio::net::TcpStream;
 
 pub struct MessageStream<A: AssignIncomingMessageHandler> {
     transport_stream: TcpStream,

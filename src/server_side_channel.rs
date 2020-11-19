@@ -4,9 +4,9 @@ use crate::message_stream::{MessageEvent, MessageStream};
 use crate::metrics::ChannelMetrics;
 use crate::server_side_handlers::{Action, Assigner};
 use crate::Error;
-use fibers::net::TcpStream;
 use futures::{Async, Poll, Stream};
 use slog::Logger;
+use tokio::net::TcpStream;
 
 #[derive(Debug)]
 pub struct ServerSideChannel {
