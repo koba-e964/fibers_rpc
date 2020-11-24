@@ -9,21 +9,21 @@ use crate::server_side_handlers::{
 use crate::{Call, Cast, Error, ProcedureId};
 use bytecodec::marker::Never;
 use factory::{DefaultFactory, Factory};
-use fibers::net::futures::{Connected, TcpListenerBind};
-use fibers::net::streams::Incoming;
 use fibers::sync::mpsc;
 use fibers::{self, BoxSpawn, Spawn};
-use futures::future::{loop_fn, Either, Loop};
 use futures::{self, Async, Future, Poll, Stream};
 use futures03::compat::Compat;
-use futures03::{Future as Future03, Stream as Stream03};
+use futures03::TryFutureExt;
+use futures03::TryStreamExt;
 use prometrics::metrics::MetricBuilder;
 use slog::{Discard, Logger};
 use std::collections::HashMap;
 use std::io::Result as IOResult;
 use std::mem;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use tokio::net::TcpListener;
+
 use tokio::net::TcpStream;
 
 /// RPC server builder.
@@ -221,8 +221,10 @@ impl ServerBuilder {
         let logger = self.logger.new(o!("server" => self.bind_addr.to_string()));
         info!(logger, "Starts RPC server");
         let handlers = mem::replace(&mut self.handlers, MessageHandlers(HashMap::new()));
+        let fut03: Pin<_> = Box::pin(TcpListener::bind(self.bind_addr));
+        let fut01 = fut03.compat();
         Server {
-            listener: Listener::Binding(Box::new(TcpListener::bind(self.bind_addr))),
+            listener: Listener::Binding(Box::new(fut01.map_err(Error::from)), self.bind_addr),
             logger,
             spawner,
             assigner: Assigner::new(handlers),
@@ -236,7 +238,7 @@ impl ServerBuilder {
 #[must_use = "futures do nothing unless polled"]
 #[derive(Debug)]
 pub struct Server<S> {
-    listener: ListenerCompat,
+    listener: Listener,
     logger: Logger,
     spawner: S,
     assigner: Assigner,
@@ -246,39 +248,15 @@ pub struct Server<S> {
 impl<S> Server<S> {
     /// Returns a future that retrieves the address to which the server is bound.
     pub fn local_addr(self) -> impl Future<Item = (Self, SocketAddr), Error = Error> {
-        match self.listener {
-            Listener::Listening(_, addr) => Either::A(futures::finished((self, addr))),
-            Listener::Binding(_) => {
-                let future = loop_fn(self, |mut this| {
-                    if fibers::fiber::with_current_context(|_| ()).is_none() {
-                        return Ok(Loop::Continue(this));
-                    }
-
-                    track!(this.listener.poll())?;
-                    if let Listener::Listening(_, addr) = this.listener {
-                        Ok(Loop::Break((this, addr)))
-                    } else {
-                        Ok(Loop::Continue(this))
-                    }
-                });
-                Either::B(future)
-            }
+        match self.listener.local_addr() {
+            Ok(local_addr) => futures::future::result(Ok((self, local_addr))),
+            Err(e) => futures::future::result(Err(e.into())),
         }
     }
 
     /// Polls the address to which the server is bound.
     pub fn poll_local_addr(&mut self) -> Poll<SocketAddr, Error> {
-        match self.listener {
-            Listener::Listening(_, addr) => Ok(Async::Ready(addr)),
-            Listener::Binding(_) => {
-                track!(self.listener.poll())?;
-                if let Listener::Listening(_, addr) = self.listener {
-                    Ok(Async::Ready(addr))
-                } else {
-                    Ok(Async::NotReady)
-                }
-            }
-        }
+        Ok(Async::Ready(self.listener.local_addr()?))
     }
 
     /// Returns the metrics of the server.
@@ -419,6 +397,53 @@ impl Stream for Listener {
     }
 }*/
 
+enum Listener {
+    Binding(
+        Box<dyn Future<Item = TcpListener, Error = Error>>,
+        SocketAddr,
+    ),
+    Listening(ListenerCompat),
+}
+
+impl Listener {
+    fn local_addr(&self) -> IOResult<SocketAddr> {
+        match &self {
+            Listener::Binding(_, local_addr) => Ok(*local_addr),
+            Listener::Listening(ref listener) => listener.local_addr(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Listener {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Listener").finish()
+    }
+}
+
+impl Stream for Listener {
+    type Item = (TcpStream, SocketAddr);
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        loop {
+            let next = match self {
+                Listener::Binding(f, _) => {
+                    if let Async::Ready(listener) = track!(f.poll().map_err(Error::from))? {
+                        let addr = track!(listener.local_addr().map_err(Error::from))?;
+                        Listener::Listening(ListenerCompat {
+                            inner: listener.compat(),
+                        })
+                    } else {
+                        break;
+                    }
+                }
+                Listener::Listening(s) => return track!(s.poll()),
+            };
+            *self = next;
+        }
+        Ok(Async::NotReady)
+    }
+}
 #[derive(Debug)]
 struct ListenerCompat {
     inner: Compat<TcpListener>,
