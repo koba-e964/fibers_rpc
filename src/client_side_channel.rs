@@ -4,9 +4,9 @@ use crate::message::{MessageId, OutgoingMessage};
 use crate::message_stream::MessageStream;
 use crate::metrics::{ChannelMetrics, ClientMetrics};
 use crate::{Error, ErrorKind, Result};
-use fibers::net::TcpStream;
 use fibers::time::timer::{self, Timeout, TimerExt};
 use futures::{Async, Future, Poll, Stream};
+use futures03::TryFutureExt;
 use slog::Logger;
 use std::fmt;
 use std::net::SocketAddr;
@@ -14,6 +14,7 @@ use std::sync::atomic::{self, AtomicBool};
 use std::sync::mpsc::RecvError;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::TcpStream;
 use trackable::error::ErrorKindExt;
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
@@ -388,7 +389,8 @@ fn tcp_connect(
     server: SocketAddr,
     options: &ChannelOptions,
 ) -> Box<dyn Future<Item = TcpStream, Error = Error> + Send + 'static> {
-    let future = TcpStream::connect(server)
+    let future = Box::pin(TcpStream::connect(server))
+        .compat()
         .timeout_after(options.tcp_connect_timeout)
         .map_err(|e| {
             e.map(Error::from)
