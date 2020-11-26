@@ -16,6 +16,7 @@ use futures::{Async, Future, Poll, Stream};
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
+use tokio::io::{AsyncRead as AsyncRead03, AsyncWrite as AsyncWrite03};
 use tokio::net::TcpStream;
 
 pub struct MessageStream<A: AssignIncomingMessageHandler> {
@@ -138,7 +139,9 @@ where
             }
 
             let old_len = self.wbuf.len();
-            track!(self.wbuf.flush(&mut self.transport_stream))?;
+            track!(self.wbuf.flush(WriteWrapper {
+                inner: &mut self.transport_stream
+            }))?;
             if self.wbuf.len() < old_len {
                 self.is_written = true;
             }
@@ -154,7 +157,9 @@ where
         &mut self,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {
         loop {
-            track!(self.rbuf.fill(&mut self.transport_stream))?;
+            track!(self.rbuf.fill(ReadWrapper {
+                inner: &mut self.transport_stream,
+            }))?;
 
             if !self.packet_header_decoder.is_idle() {
                 track!(self
@@ -347,5 +352,45 @@ impl Ord for SendingMessage {
         let ordering = (self.message.header().priority, self.seqno)
             .cmp(&(other.message.header().priority, other.seqno));
         ordering.reverse()
+    }
+}
+
+// TODO: AsyncRead を Read でラッピングする。
+// この関数は tokio の task 内部で実行されることを想定している。そうでなければ panic する。
+struct ReadWrapper<T> {
+    inner: T,
+}
+
+impl<T: AsyncRead03 + Unpin> std::io::Read for ReadWrapper<T>
+where
+    ReadWrapper<T>: Unpin,
+{
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use tokio::io::AsyncReadExt;
+        tokio::task::block_in_place(|| {
+            futures03::executor::block_on(AsyncReadExt::read(&mut self.inner, buf))
+        })
+    }
+}
+
+// TODO: AsyncWrite を Write でラッピングする。
+// この関数は tokio の task 内部で実行されることを想定している。そうでなければ panic する。
+struct WriteWrapper<T> {
+    inner: T,
+}
+
+impl<T: AsyncWrite03 + Unpin> std::io::Write for WriteWrapper<T>
+where
+    WriteWrapper<T>: Unpin,
+{
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use tokio::io::AsyncWriteExt;
+        tokio::task::block_in_place(|| {
+            futures03::executor::block_on(AsyncWriteExt::write(&mut self.inner, buf))
+        })
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        todo!()
     }
 }

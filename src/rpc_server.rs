@@ -399,7 +399,7 @@ impl Stream for Listener {
 
 enum Listener {
     Binding(
-        Box<dyn Future<Item = TcpListener, Error = Error>>,
+        Box<dyn Future<Item = TcpListener, Error = Error> + Send + 'static>,
         SocketAddr,
     ),
     Listening(ListenerCompat),
@@ -429,7 +429,6 @@ impl Stream for Listener {
             let next = match self {
                 Listener::Binding(f, _) => {
                     if let Async::Ready(listener) = track!(f.poll().map_err(Error::from))? {
-                        let addr = track!(listener.local_addr().map_err(Error::from))?;
                         Listener::Listening(ListenerCompat {
                             inner: listener.compat(),
                         })
