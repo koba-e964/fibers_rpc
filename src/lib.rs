@@ -368,21 +368,25 @@ mod tests {
 
     #[test]
     fn async_works() -> TestResult {
+        use fibers::ThreadPoolExecutor;
+        use fibers::{Executor, Spawn};
+        let mut exec = ThreadPoolExecutor::new().unwrap();
+
         // Server
         let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
         builder.add_call_handler(EchoHandler);
-        let server = builder.finish(fibers_global::handle());
-        let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
-        fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
+        let server = builder.finish(exec.handle());
+        let (server, server_addr) = track!(exec.run_future(server.local_addr()).unwrap())?;
+        exec.spawn(server.map_err(|e| panic!("{}", e)));
 
         // Client
-        let service = ClientServiceBuilder::new().finish(fibers_global::handle());
+        let service = ClientServiceBuilder::new().finish(exec.handle());
         let service_handle = service.handle();
-        fibers_global::spawn(service.map_err(|e| panic!("{}", e)));
+        exec.spawn(service.map_err(|e| panic!("Spawn failed: {}", e)));
 
         let request = Vec::from(&b"async"[..]);
         let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
-        let response = track!(fibers_global::execute(response))?;
+        let response = track!(exec.run_future(response).unwrap())?;
         assert_eq!(response, request);
 
         let metrics = service_handle
