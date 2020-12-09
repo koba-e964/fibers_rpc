@@ -367,6 +367,7 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use tokio::io::AsyncReadExt;
+        eprintln!("read:");
         tokio::task::block_in_place(|| {
             futures03::executor::block_on(AsyncReadExt::read(&mut self.inner, buf))
         })
@@ -385,6 +386,7 @@ where
 {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         use tokio::io::AsyncWriteExt;
+        eprintln!("write: {:?}", buf);
         tokio::task::block_in_place(|| {
             futures03::executor::block_on(AsyncWriteExt::write(&mut self.inner, buf))
         })

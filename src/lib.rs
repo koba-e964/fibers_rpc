@@ -377,16 +377,17 @@ mod tests {
         builder.add_call_handler(EchoHandler);
         let server = builder.finish(exec.handle());
         let (server, server_addr) = track!(exec.run_future(server.local_addr()).unwrap())?;
-        exec.spawn(server.map_err(|e| panic!("{}", e)));
+        exec.spawn(server.map_err(|e| panic!("Spawn failed: server {}", e)));
 
         // Client
         let service = ClientServiceBuilder::new().finish(exec.handle());
         let service_handle = service.handle();
-        exec.spawn(service.map_err(|e| panic!("Spawn failed: {}", e)));
+        exec.spawn(service.map_err(|e| panic!("Spawn failed: client {}", e)));
 
         let request = Vec::from(&b"async"[..]);
         let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
         let response = track!(exec.run_future(response).unwrap())?;
+        return Ok(());
         assert_eq!(response, request);
 
         let metrics = service_handle
