@@ -376,10 +376,14 @@ where
 
         match AsyncRead03::poll_read(Pin::new(&mut self.inner), &mut ctx, &mut read_buf) {
             Poll::Ready(result) => {
+                eprintln!("read done");
                 let () = result?;
                 Ok(read_buf.filled().len())
             }
-            Poll::Pending => Err(std::io::ErrorKind::WouldBlock.into()),
+            Poll::Pending => {
+                eprintln!("read pending");
+                Err(std::io::ErrorKind::WouldBlock.into())
+            }
         }
     }
 }
@@ -403,8 +407,14 @@ where
         let mut ctx = futures03::task::Context::from_waker(&waker);
 
         match AsyncWrite03::poll_write(Pin::new(&mut self.inner), &mut ctx, buf) {
-            Poll::Ready(result) => result,
-            Poll::Pending => Err(std::io::ErrorKind::WouldBlock.into()),
+            Poll::Ready(result) => {
+                eprintln!("write done");
+                result
+            }
+            Poll::Pending => {
+                eprintln!("write pending");
+                Err(std::io::ErrorKind::WouldBlock.into())
+            }
         }
     }
 
