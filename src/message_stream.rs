@@ -366,11 +366,21 @@ where
     ReadWrapper<T>: Unpin,
 {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        use tokio::io::AsyncReadExt;
+        use core::task::Poll;
+        use std::pin::Pin;
         eprintln!("read:");
-        tokio::task::block_in_place(|| {
-            futures03::executor::block_on(AsyncReadExt::read(&mut self.inner, buf))
-        })
+        // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
+        let waker = futures03::task::noop_waker();
+        let mut ctx = futures03::task::Context::from_waker(&waker);
+        let mut read_buf = tokio::io::ReadBuf::new(buf);
+
+        match AsyncRead03::poll_read(Pin::new(&mut self.inner), &mut ctx, &mut read_buf) {
+            Poll::Ready(result) => {
+                let () = result?;
+                Ok(read_buf.filled().len())
+            }
+            Poll::Pending => Err(std::io::ErrorKind::WouldBlock.into()),
+        }
     }
 }
 
@@ -380,16 +390,22 @@ struct WriteWrapper<T> {
     inner: T,
 }
 
-impl<T: AsyncWrite03 + Unpin> std::io::Write for WriteWrapper<T>
+impl<T: AsyncWrite03 + Unpin + Send> std::io::Write for WriteWrapper<T>
 where
     WriteWrapper<T>: Unpin,
 {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        use tokio::io::AsyncWriteExt;
+        use core::task::Poll;
+        use std::pin::Pin;
         eprintln!("write: {:?}", buf);
-        tokio::task::block_in_place(|| {
-            futures03::executor::block_on(AsyncWriteExt::write(&mut self.inner, buf))
-        })
+        // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
+        let waker = futures03::task::noop_waker();
+        let mut ctx = futures03::task::Context::from_waker(&waker);
+
+        match AsyncWrite03::poll_write(Pin::new(&mut self.inner), &mut ctx, buf) {
+            Poll::Ready(result) => result,
+            Poll::Pending => Err(std::io::ErrorKind::WouldBlock.into()),
+        }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

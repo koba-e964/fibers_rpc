@@ -373,7 +373,7 @@ mod tests {
         let mut exec = ThreadPoolExecutor::new().unwrap();
 
         // Server
-        let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
+        let mut builder = ServerBuilder::new("127.0.0.1:1440".parse().unwrap());
         builder.add_call_handler(EchoHandler);
         let server = builder.finish(exec.handle());
         let (server, server_addr) = track!(exec.run_future(server.local_addr()).unwrap())?;
@@ -387,7 +387,7 @@ mod tests {
         let request = Vec::from(&b"async"[..]);
         let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
         let response = track!(exec.run_future(response).unwrap())?;
-        return Ok(());
+        eprintln!("response = {:?}", response);
         assert_eq!(response, request);
 
         let metrics = service_handle
