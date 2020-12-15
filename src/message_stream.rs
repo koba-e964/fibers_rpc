@@ -13,9 +13,12 @@ use fibers::sync::mpsc;
 use fibers::time::timer::{self, Timeout};
 use fibers_tasque::DefaultCpuTaskQueue;
 use futures::{Async, Future, Poll, Stream};
+use futures03::Stream as Stream03;
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll as Poll03};
 use tokio::io::{AsyncRead as AsyncRead03, AsyncWrite as AsyncWrite03};
 use tokio::net::TcpStream;
 
@@ -285,14 +288,30 @@ where
         Ok(())
     }
 }
-impl<A: AssignIncomingMessageHandler> Stream for MessageStream<A>
+impl<A: AssignIncomingMessageHandler> Stream03 for MessageStream<A>
 where
     <A::Handler as Decode>::Item: Send + 'static,
 {
-    type Item = MessageEvent<<A::Handler as Decode>::Item>;
-    type Error = Error;
+    type Item = Result<MessageEvent<<A::Handler as Decode>::Item>>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+    fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll03<Option<Self::Item>> {
+        match self.poll_next_inner(ctx) {
+            Err(e) => Poll03::Ready(Some(Err(e))),
+            Ok(Poll03::Ready(Some(x))) => Poll03::Ready(Some(Ok(x))),
+            Ok(Poll03::Ready(None)) => Poll03::Ready(None),
+            Ok(Poll03::Pending) => Poll03::Pending,
+        }
+    }
+}
+
+impl<A: AssignIncomingMessageHandler> MessageStream<A>
+where
+    <A::Handler as Decode>::Item: Send + 'static,
+{
+    fn poll_next_inner(
+        self: Pin<&mut Self>,
+        ctx: &mut Context,
+    ) -> Result<Poll03<Option<MessageEvent<<A::Handler as Decode>::Item>>>> {
         eprintln!("MessageStream::poll");
         track!(self.check_write_timeout())?;
 
@@ -305,16 +324,16 @@ where
             eprintln!("MessageStream::poll async_incoming");
             let next_action = track!(next)?;
             let event = MessageEvent::Received { next_action };
-            return Ok(Async::Ready(Some(event)));
+            return Ok(Poll03::Ready(Some(event)));
         }
 
         if let Some(event) = track!(self.handle_incoming_messages())? {
             eprintln!("MessageStream::poll incoming_messages");
-            return Ok(Async::Ready(Some(event)));
+            return Ok(Poll03::Ready(Some(event)));
         }
         if let Some(event) = track!(self.handle_outgoing_messages())? {
             eprintln!("MessageStream::poll outgoing_messages");
-            return Ok(Async::Ready(Some(event)));
+            return Ok(Poll03::Ready(Some(event)));
         }
 
         track_assert!(
@@ -325,12 +344,13 @@ where
 
         eprintln!("MessageStream::poll about to return");
         if self.rbuf.stream_state().is_eos() {
-            Ok(Async::Ready(None))
+            Ok(Poll03::Ready(None))
         } else {
-            Ok(Async::NotReady)
+            Ok(Poll03::Pending)
         }
     }
 }
+
 impl<A: AssignIncomingMessageHandler> fmt::Debug for MessageStream<A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "MessageStream {{ .. }}")
@@ -379,7 +399,6 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use core::task::Poll;
-        use std::pin::Pin;
         eprintln!("read: (buflen={})", buf.len());
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
         let waker = futures03::task::noop_waker();
@@ -412,7 +431,6 @@ where
 {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         use core::task::Poll;
-        use std::pin::Pin;
         eprintln!("write: {:?}", buf);
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
         let waker = futures03::task::noop_waker();
