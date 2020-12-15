@@ -157,11 +157,14 @@ where
         &mut self,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {
         loop {
+            eprintln!("handle_incoming_messages loop start");
             track!(self.rbuf.fill(ReadWrapper {
                 inner: &mut self.transport_stream,
             }))?;
+            eprintln!("handle_incoming_messages loop mid 1");
 
             if !self.packet_header_decoder.is_idle() {
+                eprintln!("handle_incoming_messages not idle");
                 track!(self
                     .packet_header_decoder
                     .decode_from_read_buf(&mut self.rbuf))?;
@@ -189,6 +192,7 @@ where
                 }
             }
 
+            eprintln!("handle_incoming_messages loop mid 2");
             if let Some(header) = self.packet_header_decoder.peek().cloned() {
                 if header.is_async() {
                     let mut decoder = self
@@ -250,10 +254,12 @@ where
                     }
                 }
             }
+            eprintln!("handle_incoming_messages loop mid 3");
 
             if self.rbuf.is_empty() && !self.rbuf.stream_state().is_normal() {
                 break;
             }
+            eprintln!("handle_incoming_messages loop end");
         }
         Ok(None)
     }
@@ -287,22 +293,27 @@ where
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        eprintln!("MessageStream::poll");
         track!(self.check_write_timeout())?;
 
         while let Async::Ready(Some(message)) = self.async_outgoing_rx.poll().expect("Never fails")
         {
+            eprintln!("MessageStream::poll async_outgoing");
             self.start_sending_message(track!(message)?);
         }
         if let Async::Ready(Some(next)) = self.async_incoming_rx.poll().expect("Never fails") {
+            eprintln!("MessageStream::poll async_incoming");
             let next_action = track!(next)?;
             let event = MessageEvent::Received { next_action };
             return Ok(Async::Ready(Some(event)));
         }
 
         if let Some(event) = track!(self.handle_incoming_messages())? {
+            eprintln!("MessageStream::poll incoming_messages");
             return Ok(Async::Ready(Some(event)));
         }
         if let Some(event) = track!(self.handle_outgoing_messages())? {
+            eprintln!("MessageStream::poll outgoing_messages");
             return Ok(Async::Ready(Some(event)));
         }
 
@@ -312,6 +323,7 @@ where
             "This stream may be overloaded"
         );
 
+        eprintln!("MessageStream::poll about to return");
         if self.rbuf.stream_state().is_eos() {
             Ok(Async::Ready(None))
         } else {
@@ -368,7 +380,7 @@ where
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use core::task::Poll;
         use std::pin::Pin;
-        eprintln!("read:");
+        eprintln!("read: (buflen={})", buf.len());
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
         let waker = futures03::task::noop_waker();
         let mut ctx = futures03::task::Context::from_waker(&waker);
@@ -408,7 +420,7 @@ where
 
         match AsyncWrite03::poll_write(Pin::new(&mut self.inner), &mut ctx, buf) {
             Poll::Ready(result) => {
-                eprintln!("write done");
+                eprintln!("write done: {:?}", result);
                 result
             }
             Poll::Pending => {
