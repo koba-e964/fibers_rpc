@@ -6,7 +6,7 @@ use crate::metrics::{ChannelMetrics, ClientMetrics};
 use crate::{Error, ErrorKind, Result};
 use fibers::time::timer::{self, Timeout, TimerExt};
 use futures::{Async, Future, Poll, Stream};
-use futures03::TryFutureExt;
+use futures03::{TryFutureExt, TryStreamExt};
 use slog::Logger;
 use std::fmt;
 use std::net::SocketAddr;
@@ -165,34 +165,36 @@ impl ClientSideChannel {
                     Ok(Async::Ready(Some(connected)))
                 }
             },
-            MessageStreamState::Connected { ref mut stream } => match track!(stream.poll()) {
-                Err(e) => {
-                    error!(self.logger, "Message stream aborted: {}", e);
-                    let next = Self::wait_or_reconnect(
-                        self.server,
-                        &mut self.exponential_backoff,
-                        &self.metrics,
-                        &self.options,
-                    );
-                    Ok(Async::Ready(Some(next)))
+            MessageStreamState::Connected { ref mut stream } => {
+                match track!(stream.compat().poll()) {
+                    Err(e) => {
+                        error!(self.logger, "Message stream aborted: {}", e);
+                        let next = Self::wait_or_reconnect(
+                            self.server,
+                            &mut self.exponential_backoff,
+                            &self.metrics,
+                            &self.options,
+                        );
+                        Ok(Async::Ready(Some(next)))
+                    }
+                    Ok(Async::NotReady) => Ok(Async::NotReady),
+                    Ok(Async::Ready(None)) => {
+                        warn!(self.logger, "Message stream terminated");
+                        let next = Self::wait_or_reconnect(
+                            self.server,
+                            &mut self.exponential_backoff,
+                            &self.metrics,
+                            &self.options,
+                        );
+                        Ok(Async::Ready(Some(next)))
+                    }
+                    Ok(Async::Ready(Some(_event))) => {
+                        self.exponential_backoff.reset();
+                        self.keep_alive.extend_period();
+                        Ok(Async::Ready(None))
+                    }
                 }
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Ok(Async::Ready(None)) => {
-                    warn!(self.logger, "Message stream terminated");
-                    let next = Self::wait_or_reconnect(
-                        self.server,
-                        &mut self.exponential_backoff,
-                        &self.metrics,
-                        &self.options,
-                    );
-                    Ok(Async::Ready(Some(next)))
-                }
-                Ok(Async::Ready(Some(_event))) => {
-                    self.exponential_backoff.reset();
-                    self.keep_alive.extend_period();
-                    Ok(Async::Ready(None))
-                }
-            },
+            }
         }
     }
 }

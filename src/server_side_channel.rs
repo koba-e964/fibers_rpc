@@ -5,13 +5,15 @@ use crate::metrics::ChannelMetrics;
 use crate::server_side_handlers::{Action, Assigner};
 use crate::Error;
 use futures::{Async, Poll, Stream};
+use futures03::compat::Compat;
+use futures03::TryStreamExt;
 use slog::Logger;
 use tokio::net::TcpStream;
 
 #[derive(Debug)]
 pub struct ServerSideChannel {
     logger: Logger,
-    message_stream: MessageStream<Assigner>,
+    message_stream: Compat<MessageStream<Assigner>>,
 }
 impl ServerSideChannel {
     pub fn new(
@@ -21,7 +23,8 @@ impl ServerSideChannel {
         options: ChannelOptions,
         metrics: ChannelMetrics,
     ) -> Self {
-        let message_stream = MessageStream::new(transport_stream, assigner, options, metrics);
+        let message_stream =
+            MessageStream::new(transport_stream, assigner, options, metrics).compat();
         ServerSideChannel {
             logger,
             message_stream,
@@ -29,7 +32,7 @@ impl ServerSideChannel {
     }
 
     pub fn reply(&mut self, message: OutgoingMessage) {
-        self.message_stream.send_message(message);
+        self.message_stream.get_mut().send_message(message);
     }
 }
 impl Stream for ServerSideChannel {
@@ -51,8 +54,12 @@ impl Stream for ServerSideChannel {
                 }
 
                 count += 1;
-                if count > self.message_stream.options().yield_threshold {
-                    self.message_stream.metrics().fiber_yielded.increment();
+                if count > self.message_stream.get_ref().options().yield_threshold {
+                    self.message_stream
+                        .get_ref()
+                        .metrics()
+                        .fiber_yielded
+                        .increment();
                     return fibers::fiber::yield_poll();
                 }
             } else {
