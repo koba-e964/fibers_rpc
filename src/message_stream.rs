@@ -121,6 +121,7 @@ where
 
     fn handle_outgoing_messages(
         &mut self,
+        mut ctx: &mut Context<'_>,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {
         while !(self.sending_messages.is_empty() && self.wbuf.is_empty()) {
             if self.wbuf.room() >= MIN_PACKET_LEN {
@@ -143,7 +144,8 @@ where
 
             let old_len = self.wbuf.len();
             track!(self.wbuf.flush(WriteWrapper {
-                inner: &mut self.transport_stream
+                inner: &mut self.transport_stream,
+                ctx: &mut ctx,
             }))?;
             if self.wbuf.len() < old_len {
                 self.is_written = true;
@@ -158,11 +160,13 @@ where
     #[allow(clippy::map_entry)]
     fn handle_incoming_messages(
         &mut self,
+        mut ctx: &mut Context<'_>,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {
         loop {
             eprintln!("handle_incoming_messages loop start");
             track!(self.rbuf.fill(ReadWrapper {
                 inner: &mut self.transport_stream,
+                ctx: &mut ctx,
             }))?;
             eprintln!("handle_incoming_messages loop mid 1");
 
@@ -310,7 +314,7 @@ where
 {
     fn poll_next_inner(
         self: Pin<&mut Self>,
-        ctx: &mut Context,
+        ctx: &mut Context<'_>,
     ) -> Result<Poll03<Option<MessageEvent<<A::Handler as Decode>::Item>>>> {
         // SAFETY: not verified (TODO)
         let unpinned_self = unsafe { self.get_unchecked_mut() };
@@ -332,11 +336,11 @@ where
             return Ok(Poll03::Ready(Some(event)));
         }
 
-        if let Some(event) = track!(unpinned_self.handle_incoming_messages())? {
+        if let Some(event) = track!(unpinned_self.handle_incoming_messages(ctx))? {
             eprintln!("MessageStream::poll incoming_messages");
             return Ok(Poll03::Ready(Some(event)));
         }
-        if let Some(event) = track!(unpinned_self.handle_outgoing_messages())? {
+        if let Some(event) = track!(unpinned_self.handle_outgoing_messages(ctx))? {
             eprintln!("MessageStream::poll outgoing_messages");
             return Ok(Poll03::Ready(Some(event)));
         }
@@ -394,23 +398,23 @@ impl Ord for SendingMessage {
 
 // TODO: AsyncRead を Read でラッピングする。
 // この関数は tokio の task 内部で実行されることを想定している。そうでなければ panic する。
-struct ReadWrapper<T> {
+struct ReadWrapper<'a, 'b, T> {
     inner: T,
+    ctx: &'a mut Context<'b>,
 }
 
-impl<T: AsyncRead03 + Unpin> std::io::Read for ReadWrapper<T>
+impl<'a, 'b, T: AsyncRead03 + Unpin> std::io::Read for ReadWrapper<'a, 'b, T>
 where
-    ReadWrapper<T>: Unpin,
+    ReadWrapper<'a, 'b, T>: Unpin,
 {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use core::task::Poll;
         eprintln!("read: (buflen={})", buf.len());
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
-        let waker = futures03::task::noop_waker();
-        let mut ctx = futures03::task::Context::from_waker(&waker);
+        let ctx = &mut self.ctx;
         let mut read_buf = tokio::io::ReadBuf::new(buf);
 
-        match AsyncRead03::poll_read(Pin::new(&mut self.inner), &mut ctx, &mut read_buf) {
+        match AsyncRead03::poll_read(Pin::new(&mut self.inner), ctx, &mut read_buf) {
             Poll::Ready(result) => {
                 eprintln!("read done");
                 let () = result?;
@@ -426,22 +430,22 @@ where
 
 // TODO: AsyncWrite を Write でラッピングする。
 // この関数は tokio の task 内部で実行されることを想定している。そうでなければ panic する。
-struct WriteWrapper<T> {
+struct WriteWrapper<'a, 'b, T> {
     inner: T,
+    ctx: &'a mut Context<'b>,
 }
 
-impl<T: AsyncWrite03 + Unpin + Send> std::io::Write for WriteWrapper<T>
+impl<'a, 'b, T: AsyncWrite03 + Unpin + Send> std::io::Write for WriteWrapper<'a, 'b, T>
 where
-    WriteWrapper<T>: Unpin,
+    WriteWrapper<'a, 'b, T>: Unpin,
 {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         use core::task::Poll;
         eprintln!("write: {:?}", buf);
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
-        let waker = futures03::task::noop_waker();
-        let mut ctx = futures03::task::Context::from_waker(&waker);
+        let ctx = &mut self.ctx;
 
-        match AsyncWrite03::poll_write(Pin::new(&mut self.inner), &mut ctx, buf) {
+        match AsyncWrite03::poll_write(Pin::new(&mut self.inner), ctx, buf) {
             Poll::Ready(result) => {
                 eprintln!("write done: {:?}", result);
                 result
