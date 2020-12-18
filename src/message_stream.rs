@@ -312,38 +312,43 @@ where
         self: Pin<&mut Self>,
         ctx: &mut Context,
     ) -> Result<Poll03<Option<MessageEvent<<A::Handler as Decode>::Item>>>> {
+        // SAFETY: not verified (TODO)
+        let unpinned_self = unsafe { self.get_unchecked_mut() };
         eprintln!("MessageStream::poll");
-        track!(self.check_write_timeout())?;
+        track!(unpinned_self.check_write_timeout())?;
 
-        while let Async::Ready(Some(message)) = self.async_outgoing_rx.poll().expect("Never fails")
+        while let Async::Ready(Some(message)) =
+            unpinned_self.async_outgoing_rx.poll().expect("Never fails")
         {
             eprintln!("MessageStream::poll async_outgoing");
-            self.start_sending_message(track!(message)?);
+            unpinned_self.start_sending_message(track!(message)?);
         }
-        if let Async::Ready(Some(next)) = self.async_incoming_rx.poll().expect("Never fails") {
+        if let Async::Ready(Some(next)) =
+            unpinned_self.async_incoming_rx.poll().expect("Never fails")
+        {
             eprintln!("MessageStream::poll async_incoming");
             let next_action = track!(next)?;
             let event = MessageEvent::Received { next_action };
             return Ok(Poll03::Ready(Some(event)));
         }
 
-        if let Some(event) = track!(self.handle_incoming_messages())? {
+        if let Some(event) = track!(unpinned_self.handle_incoming_messages())? {
             eprintln!("MessageStream::poll incoming_messages");
             return Ok(Poll03::Ready(Some(event)));
         }
-        if let Some(event) = track!(self.handle_outgoing_messages())? {
+        if let Some(event) = track!(unpinned_self.handle_outgoing_messages())? {
             eprintln!("MessageStream::poll outgoing_messages");
             return Ok(Poll03::Ready(Some(event)));
         }
 
         track_assert!(
-            self.sending_messages.len() <= self.options.max_transmit_queue_len,
+            unpinned_self.sending_messages.len() <= unpinned_self.options.max_transmit_queue_len,
             ErrorKind::Other,
             "This stream may be overloaded"
         );
 
         eprintln!("MessageStream::poll about to return");
-        if self.rbuf.stream_state().is_eos() {
+        if unpinned_self.rbuf.stream_state().is_eos() {
             Ok(Poll03::Ready(None))
         } else {
             Ok(Poll03::Pending)
