@@ -31,7 +31,6 @@ tokio = { version = "0.3", features = ["net", "stream", "io-util"] }
 
 [dev-dependencies]
 clap = "2"
-fibers_global = "0.1"
 sloggers = "0.3"
 
 [patch.crates-io]
