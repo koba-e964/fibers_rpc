@@ -276,7 +276,6 @@ mod tests {
     use crate::server::{HandleCall, Reply, ServerBuilder};
     use crate::{Call, ProcedureId};
     use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
-    use fibers_global;
     use futures::Future;
     use trackable::result::TestResult;
 
@@ -313,21 +312,27 @@ mod tests {
 
     #[test]
     fn it_works() -> TestResult {
+        use fibers::ThreadPoolExecutor;
+        use fibers::{Executor, Spawn};
+
+        // executor
+        let mut exec = ThreadPoolExecutor::with_thread_count(10).unwrap();
+
         // Server
-        let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
+        let mut builder = ServerBuilder::new("127.0.0.1:1234".parse().unwrap());
         builder.add_call_handler(EchoHandler);
-        let server = builder.finish(fibers_global::handle());
-        let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
-        fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
+        let server = builder.finish(exec.handle());
+        let (server, server_addr) = track!(exec.run_future(server.local_addr()).unwrap())?;
+        exec.spawn(server.map_err(|e| panic!("{}", e)));
 
         // Client
-        let service = ClientServiceBuilder::new().finish(fibers_global::handle());
+        let service = ClientServiceBuilder::new().finish(exec.handle());
         let service_handle = service.handle();
-        fibers_global::spawn(service.map_err(|e| panic!("{}", e)));
+        exec.spawn(service.map_err(|e| panic!("{}", e)));
 
         let request = Vec::from(&b"hello"[..]);
         let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
-        let response = track_any_err!(fibers_global::execute(response))?;
+        let response = track_any_err!(exec.run_future(response).unwrap())?;
         assert_eq!(response, request);
 
         let metrics = service_handle
@@ -345,23 +350,29 @@ mod tests {
 
     #[test]
     fn large_message_works() -> TestResult {
+        use fibers::ThreadPoolExecutor;
+        use fibers::{Executor, Spawn};
+
+        // executor
+        let mut exec = ThreadPoolExecutor::with_thread_count(10).unwrap();
+
         // Server
-        let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
+        let mut builder = ServerBuilder::new("127.0.0.1:1442".parse().unwrap());
         builder.add_call_handler(EchoHandler);
-        let server = builder.finish(fibers_global::handle());
+        let server = builder.finish(exec.handle());
         // let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
         let future = server.local_addr();
-        let (server, server_addr) = track!(fibers_global::execute(future))?;
-        fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
+        let (server, server_addr) = track!(exec.run_future(future).unwrap())?;
+        exec.spawn(server.map_err(|e| panic!("{}", e)));
 
         // Client
-        let service = ClientServiceBuilder::new().finish(fibers_global::handle());
+        let service = ClientServiceBuilder::new().finish(exec.handle());
         let service_handle = service.handle();
-        fibers_global::spawn(service.map_err(|e| panic!("{}", e)));
+        exec.spawn(service.map_err(|e| panic!("{}", e)));
 
         let request = vec![0; 10 * 1024 * 1024];
         let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
-        let response = track!(fibers_global::execute(response))?;
+        let response = track!(exec.run_future(response).unwrap())?;
         assert_eq!(response, request);
         Ok(())
     }

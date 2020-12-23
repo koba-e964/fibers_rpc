@@ -4,7 +4,7 @@ use crate::message::{
 };
 use crate::metrics::ChannelMetrics;
 use crate::packet::{PacketHeaderDecoder, PacketizedMessage, MIN_PACKET_LEN};
-use crate::{Error, ErrorKind, Result};
+use crate::{ErrorKind, Result};
 use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use bytecodec::combinator::{MaybeEos, Peekable, Slice};
 use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
@@ -12,7 +12,7 @@ use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
 use fibers::sync::mpsc;
 use fibers::time::timer::{self, Timeout};
 use fibers_tasque::DefaultCpuTaskQueue;
-use futures::{Async, Future, Poll, Stream};
+use futures::{Async, Future, Stream};
 use futures03::Stream as Stream03;
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
@@ -441,7 +441,6 @@ where
 {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         use core::task::Poll;
-        eprintln!("write: {:?}", buf);
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
         let ctx = &mut self.ctx;
 
