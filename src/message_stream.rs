@@ -163,15 +163,12 @@ where
         mut ctx: &mut Context<'_>,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {
         loop {
-            eprintln!("handle_incoming_messages loop start");
             track!(self.rbuf.fill(ReadWrapper {
                 inner: &mut self.transport_stream,
                 ctx: &mut ctx,
             }))?;
-            eprintln!("handle_incoming_messages loop mid 1");
 
             if !self.packet_header_decoder.is_idle() {
-                eprintln!("handle_incoming_messages not idle");
                 track!(self
                     .packet_header_decoder
                     .decode_from_read_buf(&mut self.rbuf))?;
@@ -199,7 +196,6 @@ where
                 }
             }
 
-            eprintln!("handle_incoming_messages loop mid 2");
             if let Some(header) = self.packet_header_decoder.peek().cloned() {
                 if header.is_async() {
                     let mut decoder = self
@@ -261,12 +257,10 @@ where
                     }
                 }
             }
-            eprintln!("handle_incoming_messages loop mid 3");
 
             if self.rbuf.is_empty() && !self.rbuf.stream_state().is_normal() {
                 break;
             }
-            eprintln!("handle_incoming_messages loop end");
         }
         Ok(None)
     }
@@ -318,30 +312,25 @@ where
     ) -> Result<Poll03<Option<MessageEvent<<A::Handler as Decode>::Item>>>> {
         // SAFETY: not verified (TODO)
         let unpinned_self = unsafe { self.get_unchecked_mut() };
-        eprintln!("MessageStream::poll");
         track!(unpinned_self.check_write_timeout())?;
 
         while let Async::Ready(Some(message)) =
             unpinned_self.async_outgoing_rx.poll().expect("Never fails")
         {
-            eprintln!("MessageStream::poll async_outgoing");
             unpinned_self.start_sending_message(track!(message)?);
         }
         if let Async::Ready(Some(next)) =
             unpinned_self.async_incoming_rx.poll().expect("Never fails")
         {
-            eprintln!("MessageStream::poll async_incoming");
             let next_action = track!(next)?;
             let event = MessageEvent::Received { next_action };
             return Ok(Poll03::Ready(Some(event)));
         }
 
         if let Some(event) = track!(unpinned_self.handle_incoming_messages(ctx))? {
-            eprintln!("MessageStream::poll incoming_messages");
             return Ok(Poll03::Ready(Some(event)));
         }
         if let Some(event) = track!(unpinned_self.handle_outgoing_messages(ctx))? {
-            eprintln!("MessageStream::poll outgoing_messages");
             return Ok(Poll03::Ready(Some(event)));
         }
 
@@ -351,7 +340,6 @@ where
             "This stream may be overloaded"
         );
 
-        eprintln!("MessageStream::poll about to return");
         if unpinned_self.rbuf.stream_state().is_eos() {
             Ok(Poll03::Ready(None))
         } else {
@@ -409,19 +397,16 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use core::task::Poll;
-        eprintln!("read: (buflen={})", buf.len());
         // https://docs.rs/crate/async-stdio/0.3.0-alpha.4/source/src/lib.rs
         let ctx = &mut self.ctx;
         let mut read_buf = tokio::io::ReadBuf::new(buf);
 
         match AsyncRead03::poll_read(Pin::new(&mut self.inner), ctx, &mut read_buf) {
             Poll::Ready(result) => {
-                eprintln!("read done");
                 let () = result?;
                 Ok(read_buf.filled().len())
             }
             Poll::Pending => {
-                eprintln!("read pending");
                 Err(std::io::ErrorKind::WouldBlock.into())
             }
         }
@@ -446,11 +431,9 @@ where
 
         match AsyncWrite03::poll_write(Pin::new(&mut self.inner), ctx, buf) {
             Poll::Ready(result) => {
-                eprintln!("write done: {:?}", result);
                 result
             }
             Poll::Pending => {
-                eprintln!("write pending");
                 Err(std::io::ErrorKind::WouldBlock.into())
             }
         }

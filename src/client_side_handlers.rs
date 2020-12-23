@@ -32,7 +32,6 @@ impl<T> Future for Response<T> {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        eprintln!("self = {:?} timeout = {:?}", "hit", self.timeout);
         let item = self.reply_rx.poll().map_err(|e| {
             track!(e.unwrap_or_else(|| ErrorKind::Other
                 .cause("RPC response monitoring channel disconnected")
