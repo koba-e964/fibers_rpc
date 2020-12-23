@@ -39,6 +39,7 @@
 //! use fibers_rpc::client::ClientServiceBuilder;
 //! use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 //! use futures::Future;
+//! use fibers::{ThreadPoolExecutor, Executor, Spawn};
 //!
 //! // RPC definition
 //! struct EchoRpc;
@@ -62,20 +63,21 @@
 //!         Reply::done(request)
 //!     }
 //! }
+//! let mut exec = ThreadPoolExecutor::with_thread_count(10).unwrap();
 //! let server_addr = "127.0.0.1:1919".parse().unwrap();
 //! let mut builder = ServerBuilder::new(server_addr);
 //! builder.add_call_handler(EchoHandler);
-//! let server = builder.finish(fibers_global::handle());
-//! fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
+//! let server = builder.finish(exec.handle());
+//! exec.spawn(server.map_err(|e| panic!("{}", e)));
 //!
 //! // RPC client
-//! let service = ClientServiceBuilder::new().finish(fibers_global::handle());
+//! let service = ClientServiceBuilder::new().finish(exec.handle());
 //! let service_handle = service.handle();
-//! fibers_global::spawn(service.map_err(|e| panic!("{}", e)));
+//! exec.spawn(service.map_err(|e| panic!("{}", e)));
 //!
 //! let request = Vec::from(&b"hello"[..]);
 //! let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
-//! let response = fibers_global::execute(response)?;
+//! let response = exec.run_future(response).unwrap()?;
 //! assert_eq!(response, request);
 //! # Ok(())
 //! # }
@@ -360,7 +362,6 @@ mod tests {
         let mut builder = ServerBuilder::new("127.0.0.1:1442".parse().unwrap());
         builder.add_call_handler(EchoHandler);
         let server = builder.finish(exec.handle());
-        // let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
         let future = server.local_addr();
         let (server, server_addr) = track!(exec.run_future(future).unwrap())?;
         exec.spawn(server.map_err(|e| panic!("{}", e)));
