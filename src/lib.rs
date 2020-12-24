@@ -326,6 +326,7 @@ mod tests {
         let server = builder.finish(exec.handle());
         let (server, server_addr) = track!(exec.run_future(server.local_addr()).unwrap())?;
         exec.spawn(server.map_err(|e| panic!("{}", e)));
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Client
         let service = ClientServiceBuilder::new().finish(exec.handle());
@@ -365,6 +366,7 @@ mod tests {
         let future = server.local_addr();
         let (server, server_addr) = track!(exec.run_future(future).unwrap())?;
         exec.spawn(server.map_err(|e| panic!("{}", e)));
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Client
         let service = ClientServiceBuilder::new().finish(exec.handle());
@@ -390,6 +392,7 @@ mod tests {
         let server = builder.finish(exec.handle());
         let (server, server_addr) = track!(exec.run_future(server.local_addr()).unwrap())?;
         exec.spawn(server.map_err(|e| panic!("Spawn failed: server {}", e)));
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Client
         let service = ClientServiceBuilder::new().finish(exec.handle());
