@@ -8,11 +8,13 @@ use crate::server_side_handlers::{
 };
 use crate::{Call, Cast, Error, ProcedureId};
 use bytecodec::marker::Never;
+use core::task::{Context, Poll as Poll03};
 use factory::{DefaultFactory, Factory};
 use fibers::sync::mpsc;
 use fibers::{self, BoxSpawn, Spawn};
 use futures::{self, Async, Future, Poll, Stream};
 use futures03::compat::Compat;
+use futures03::Stream as Stream03;
 use futures03::TryFutureExt;
 use futures03::TryStreamExt;
 use prometrics::metrics::MetricBuilder;
@@ -430,7 +432,7 @@ impl Stream for Listener {
                 Listener::Binding(f, _) => {
                     if let Async::Ready(listener) = track!(f.poll().map_err(Error::from))? {
                         Listener::Listening(ListenerCompat {
-                            inner: listener.compat(),
+                            inner: TcpListenerWrapper(listener).compat(),
                         })
                     } else {
                         break;
@@ -443,9 +445,34 @@ impl Stream for Listener {
         Ok(Async::NotReady)
     }
 }
+
+#[derive(Debug)]
+struct TcpListenerWrapper(TcpListener);
+
+impl TcpListenerWrapper {
+    fn local_addr(&self) -> IOResult<SocketAddr> {
+        self.0.local_addr()
+    }
+}
+
+impl Stream03 for TcpListenerWrapper {
+    type Item = IOResult<TcpStream>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll03<Option<Self::Item>> {
+        match self.0.poll_accept(cx) {
+            Poll03::Ready(Ok((socket, _))) => Poll03::Ready(Some(Ok(socket))),
+            Poll03::Ready(Err(e)) => Poll03::Ready(Some(Err(e))),
+            Poll03::Pending => Poll03::Pending,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ListenerCompat {
-    inner: Compat<TcpListener>,
+    inner: Compat<TcpListenerWrapper>,
 }
 
 impl Stream for ListenerCompat {

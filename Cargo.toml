@@ -27,11 +27,11 @@ futures03 = { package = "futures", version = "0.3" }
 prometrics = "0.1"
 slog = "2"
 trackable = "0.2"
-tokio = { version = "0.3", features = ["net", "stream", "io-util"] }
+tokio = { version = "1.0", features = ["net", "io-util"] }
 
 [dev-dependencies]
 clap = "2"
 sloggers = "0.3"
 
 [patch.crates-io]
-fibers = { git = "https://github.com/dwango/fibers-rs", branch = "tmp/sync-delegates-to-futures-0.1" }
+fibers = { git = "https://github.com/dwango/fibers-rs", branch = "tmp/tokio-1.0" }

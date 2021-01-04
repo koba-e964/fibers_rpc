@@ -406,9 +406,7 @@ where
                 let () = result?;
                 Ok(read_buf.filled().len())
             }
-            Poll::Pending => {
-                Err(std::io::ErrorKind::WouldBlock.into())
-            }
+            Poll::Pending => Err(std::io::ErrorKind::WouldBlock.into()),
         }
     }
 }
@@ -430,12 +428,8 @@ where
         let ctx = &mut self.ctx;
 
         match AsyncWrite03::poll_write(Pin::new(&mut self.inner), ctx, buf) {
-            Poll::Ready(result) => {
-                result
-            }
-            Poll::Pending => {
-                Err(std::io::ErrorKind::WouldBlock.into())
-            }
+            Poll::Ready(result) => result,
+            Poll::Pending => Err(std::io::ErrorKind::WouldBlock.into()),
         }
     }
 
